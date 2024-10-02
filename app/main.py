@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, Form
 from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 import aiohttp
-from app.llm_voice import get_llm_response, text_to_speech, Config
+from app.llm_speech import get_llm_response, text_to_speech, Config
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")

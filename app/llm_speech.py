@@ -7,6 +7,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 import logging
 from typing import Optional, Dict, List
+import requests
 
 # Configure logging
 logging.basicConfig(
@@ -20,10 +21,10 @@ class Config(BaseModel):
     openai_api_key: str = Field(default=os.getenv("OPENAI_API_KEY"))
     elevenlabs_api_key: str = Field(default=os.getenv("ELEVENLABS_API_KEY"))
     elevenlabs_voice_id: str = Field(
-        default=os.getenv("ELEVENLABS_VOICE_ID", "eleven_monolingual_v1")
+        default=os.getenv("ELEVENLABS_VOICE_ID", "3lQ2xvA6eQm4KqkV0SRd")
     )
     elevenlabs_model_id: str = Field(
-        default=os.getenv("ELEVENLABS_MODEL_ID", "eleven_monolingual_v1")
+        default=os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5")
     )
     openai_model: str = Field(default=os.getenv("OPENAI_MODEL", "gpt-3.5-turbo"))
     output_dir: str = Field(default=os.getenv("OUTPUT_DIR", "output"))
@@ -83,7 +84,7 @@ async def get_llm_response(prompt: str) -> Optional[str]:
 
 
 async def text_to_speech(text: str, session: aiohttp.ClientSession):
-    """Asynchronously convert text to speech using ElevenLabs API and yield audio chunks."""
+    """Asynchronously convert text to speech using ElevenLabs API and return the response."""
     headers = {
         "Accept": "audio/mpeg",
         "xi-api-key": config.elevenlabs_api_key,
@@ -102,15 +103,15 @@ async def text_to_speech(text: str, session: aiohttp.ClientSession):
             ELEVENLABS_API_URL, json=data, headers=headers
         ) as response:
             if response.status == 200:
-                async for chunk in response.content.iter_any():
-                    if chunk:
-                        yield chunk
+                return await response.read()
             else:
                 logger.error(
                     f"Error in text-to-speech request: {response.status} - {await response.text()}"
                 )
+                return None
     except Exception as e:
         logger.error(f"Error in text-to-speech request: {e}")
+        return None
 
 
 async def process_prompt(prompt: str, session: aiohttp.ClientSession) -> None:
@@ -126,12 +127,17 @@ async def process_prompt(prompt: str, session: aiohttp.ClientSession) -> None:
         # Ensure the output directory exists
         os.makedirs(config.output_dir, exist_ok=True)
 
-        # Write the audio chunks to a file
-        with open(audio_filepath, "wb") as audio_file:
-            async for chunk in text_to_speech(llm_response, session):
-                audio_file.write(chunk)
+        # Get the audio response
+        audio_data = await text_to_speech(llm_response, session)
 
-        logger.info(f"Audio saved as '{audio_filepath}'")
+        if audio_data:
+            # Write the audio data to a file
+            with open(audio_filepath, "wb") as audio_file:
+                audio_file.write(audio_data)
+
+            logger.info(f"Audio saved as '{audio_filepath}'")
+        else:
+            logger.error("Failed to get audio response.")
     else:
         logger.error("Failed to get LLM response.")
 

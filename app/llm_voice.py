@@ -20,7 +20,10 @@ class Config(BaseModel):
     openai_api_key: str = Field(default=os.getenv("OPENAI_API_KEY"))
     elevenlabs_api_key: str = Field(default=os.getenv("ELEVENLABS_API_KEY"))
     elevenlabs_voice_id: str = Field(
-        default=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+        default=os.getenv("ELEVENLABS_VOICE_ID", "eleven_monolingual_v1")
+    )
+    elevenlabs_model_id: str = Field(
+        default=os.getenv("ELEVENLABS_MODEL_ID", "eleven_monolingual_v1")
     )
     openai_model: str = Field(default=os.getenv("OPENAI_MODEL", "gpt-3.5-turbo"))
     output_dir: str = Field(default=os.getenv("OUTPUT_DIR", "output"))
@@ -79,13 +82,8 @@ async def get_llm_response(prompt: str) -> Optional[str]:
         return None
 
 
-async def text_to_speech(text: str, session: aiohttp.ClientSession) -> Optional[str]:
-    """Asynchronously convert text to speech using ElevenLabs API, using cache if available."""
-    cache_key = get_cache_key(text)
-    if cache_key in audio_cache:
-        logger.info("Using cached audio file")
-        return audio_cache[cache_key]
-
+async def text_to_speech(text: str, session: aiohttp.ClientSession):
+    """Asynchronously convert text to speech using ElevenLabs API and yield audio chunks."""
     headers = {
         "Accept": "audio/mpeg",
         "xi-api-key": config.elevenlabs_api_key,
@@ -93,38 +91,26 @@ async def text_to_speech(text: str, session: aiohttp.ClientSession) -> Optional[
     }
     data = {
         "text": text,
-        "model_id": "eleven_monolingual_v1",  # Optional: Specify if you want a particular model
+        "model_id": config.elevenlabs_model_id,
         "voice_settings": {
             "stability": 0.5,
             "similarity_boost": 0.5,
-        },  # Optional: Customize voice settings if needed
+        },
     }
     try:
         async with session.post(
             ELEVENLABS_API_URL, json=data, headers=headers
         ) as response:
             if response.status == 200:
-                audio_content = await response.read()
-                filename = f"output_{cache_key}.mp3"
-                filepath = os.path.join(config.output_dir, filename)
-                os.makedirs(config.output_dir, exist_ok=True)
-                with open(filepath, "wb") as audio_file:
-                    audio_file.write(audio_content)
-                audio_cache[cache_key] = filepath
-
-                # Save cache to file
-                with open(os.path.join(config.cache_dir, "audio_cache.json"), "w") as f:
-                    json.dump(audio_cache, f)
-
-                return filepath
+                async for chunk in response.content.iter_any():
+                    if chunk:
+                        yield chunk
             else:
                 logger.error(
-                    f"Error in text-to-speech request: {await response.text()}"
+                    f"Error in text-to-speech request: {response.status} - {await response.text()}"
                 )
-                return None
     except Exception as e:
         logger.error(f"Error in text-to-speech request: {e}")
-        return None
 
 
 async def process_prompt(prompt: str, session: aiohttp.ClientSession) -> None:
@@ -133,11 +119,19 @@ async def process_prompt(prompt: str, session: aiohttp.ClientSession) -> None:
     if llm_response:
         logger.info(f"LLM Response: {llm_response}")
 
-        audio_filepath = await text_to_speech(llm_response, session)
-        if audio_filepath:
-            logger.info(f"Audio saved as '{audio_filepath}'")
-        else:
-            logger.error("Failed to generate audio.")
+        # Create a unique filename for the audio
+        audio_filename = f"{get_cache_key(llm_response)}.mp3"
+        audio_filepath = os.path.join(config.output_dir, audio_filename)
+
+        # Ensure the output directory exists
+        os.makedirs(config.output_dir, exist_ok=True)
+
+        # Write the audio chunks to a file
+        with open(audio_filepath, "wb") as audio_file:
+            async for chunk in text_to_speech(llm_response, session):
+                audio_file.write(chunk)
+
+        logger.info(f"Audio saved as '{audio_filepath}'")
     else:
         logger.error("Failed to get LLM response.")
 

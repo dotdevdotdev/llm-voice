@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Voice Generator</title>
+</head>
+
+<body>
+    <h1>LLM Voice Generator</h1>
+    <form id="promptForm">
+        <input type="text" id="prompt" name="prompt" required>
+        <button type="submit">Generate Audio</button>
+    </form>
+    <audio id="audioPlayer" controls></audio>
+
+    <script>
+        document.getElementById('promptForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const prompt = document.getElementById('prompt').value;
+            const response = await fetch('/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `prompt=${encodeURIComponent(prompt)}`
+            });
+
+            if (response.ok) {
+                const audioPlayer = document.getElementById('audioPlayer');
+                audioPlayer.src = URL.createObjectURL(await response.blob());
+                audioPlayer.play();
+            } else {
+                alert('Error generating audio');
+            }
+        });
+    </script>
+</body>
+
+</html>

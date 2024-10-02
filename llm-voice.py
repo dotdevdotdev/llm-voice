@@ -6,7 +6,7 @@ import json
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 import logging
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 
 # Configure logging
 logging.basicConfig(
@@ -17,18 +17,24 @@ logger = logging.getLogger(__name__)
 
 # Configuration model
 class Config(BaseModel):
-    openai_api_key: str = Field(..., env="OPENAI_API_KEY")
-    elevenlabs_api_key: str = Field(..., env="ELEVENLABS_API_KEY")
+    openai_api_key: str = Field(default=os.getenv("OPENAI_API_KEY"))
+    elevenlabs_api_key: str = Field(default=os.getenv("ELEVENLABS_API_KEY"))
     elevenlabs_voice_id: str = Field(
-        default="21m00Tcm4TlvDq8ikWAM", env="ELEVENLABS_VOICE_ID"
+        default=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
     )
-    openai_model: str = Field(default="gpt-3.5-turbo")
-    output_dir: str = Field(default="output")
-    cache_dir: str = Field(default="cache")
+    openai_model: str = Field(default=os.getenv("OPENAI_MODEL", "gpt-3.5-turbo"))
+    output_dir: str = Field(default=os.getenv("OUTPUT_DIR", "output"))
+    cache_dir: str = Field(default=os.getenv("CACHE_DIR", "cache"))
 
 
 # Load configuration
 config = Config()
+
+# Validate required fields
+if not config.openai_api_key:
+    raise ValueError("OPENAI_API_KEY environment variable is not set")
+if not config.elevenlabs_api_key:
+    raise ValueError("ELEVENLABS_API_KEY environment variable is not set")
 
 # Initialize AsyncOpenAI client
 client = AsyncOpenAI(api_key=config.openai_api_key)
@@ -87,8 +93,11 @@ async def text_to_speech(text: str, session: aiohttp.ClientSession) -> Optional[
     }
     data = {
         "text": text,
-        "model_id": "eleven_monolingual_v1",
-        "voice_settings": {"stability": 0.5, "similarity_boost": 0.5},
+        "model_id": "eleven_monolingual_v1",  # Optional: Specify if you want a particular model
+        "voice_settings": {
+            "stability": 0.5,
+            "similarity_boost": 0.5,
+        },  # Optional: Customize voice settings if needed
     }
     try:
         async with session.post(
@@ -133,6 +142,13 @@ async def process_prompt(prompt: str, session: aiohttp.ClientSession) -> None:
         logger.error("Failed to get LLM response.")
 
 
+async def process_multiple_prompts(
+    prompts: List[str], session: aiohttp.ClientSession
+) -> None:
+    """Process multiple prompts concurrently."""
+    await asyncio.gather(*(process_prompt(prompt, session) for prompt in prompts))
+
+
 async def main():
     # Load caches from files
     global llm_cache, audio_cache
@@ -162,3 +178,7 @@ if __name__ == "__main__":
 # TODO: Consider containerizing the application
 # Containerization would make deployment and scaling easier, ensuring
 # consistent environments across different systems.
+
+# TODO: Add unit tests for key functions
+# Implement unit tests to ensure the reliability of functions,
+# especially for caching mechanisms and API interactions.

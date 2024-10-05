@@ -1,2 +1,121 @@
-Here are some best practices and rules you must follow:- You use Python 3.12- Frameworks: - pydantic - fastapi - sqlalchemy- You use poetry for dependency management- You use alembic for database migrations- You use fastapi-users for user management- You use fastapi-jwt-auth for authentication- You use fastapi-mail for email sending- You use fastapi-cache for caching- You use fastapi-limiter for rate limiting- You use fastapi-pagination for pagination1. **Use Meaningful Names**: Choose descriptive variable, function, and class names.2. **Follow PEP 8**: Adhere to the Python Enhancement Proposal 8 style guide for formatting.3. **Use Docstrings**: Document functions and classes with docstrings to explain their purpose.4. **Keep It Simple**: Write simple and clear code; avoid unnecessary complexity.5. **Use List Comprehensions**: Prefer list comprehensions for creating lists over traditional loops when appropriate.6. **Handle Exceptions**: Use try-except blocks to handle exceptions gracefully.7. **Use Virtual Environments**: Isolate project dependencies using virtual environments (e.g., `venv`).8. **Write Tests**: Implement unit tests to ensure code reliability.9. **Use Type Hints**: Utilize type hints for better code clarity and type checking.10. **Avoid Global Variables**: Limit the use of global variables to reduce side effects.These rules will help you write clean, efficient, and maintainable Python code.
-Text to speech button
+# Python 3.12 and ElevenLabs Websockets Project Guidelines
+
+## Python 3.12 Features and Best Practices
+
+1. **Use Python 3.12**: Leverage the latest features and improvements.
+2. **Type Hinting**: Utilize Python 3.12's enhanced type hinting capabilities.
+3. **Pattern Matching**: Use structural pattern matching for complex conditionals.
+4. **F-strings**: Employ f-strings with `=` for debugging (e.g., `f"{variable=}"`).
+5. **Asynchronous Programming**: Leverage `asyncio` improvements in Python 3.12.
+
+## Project-Specific Framework and Library Usage
+
+1. **FastAPI**: Use for building high-performance APIs.
+2. **Pydantic**: Employ for data validation and settings management.
+3. **SQLAlchemy**: Utilize as the ORM for database interactions.
+4. **MongoDB**: Use for database migrations.
+5. **FastAPI Users**: Implement for comprehensive user management.
+6. **FastAPI JWT Auth**: Use for authentication.
+7. **FastAPI Mail**: Implement for email functionality.
+8. **FastAPI Cache**: Use for efficient caching mechanisms.
+9. **FastAPI Limiter**: Implement for rate limiting.
+10. **FastAPI Pagination**: Use for paginating list endpoints.
+
+## Coding Standards and Best Practices
+
+1. **PEP 8 Compliance**: Adhere strictly to PEP 8 style guidelines.
+2. **Docstrings**: Write clear, concise docstrings for all functions, classes, and modules.
+3. **Type Annotations**: Use type hints consistently throughout the codebase.
+4. **Error Handling**: Implement comprehensive exception handling with specific exception types.
+5. **Logging**: Use the `logging` module for consistent and informative logging.
+6. **Environment Variables**: Store configuration in environment variables, never in code.
+7. **Testing**: Maintain high test coverage using `pytest`.
+8. **Linting and Formatting**: Use tools like `flake8`, `black`, and `isort`.
+
+## ElevenLabs Websockets Best Practices
+
+1. **Connection Management**:
+
+   - Use a single websocket connection for multiple TTS requests when possible.
+   - Implement reconnection logic with exponential backoff.
+   - Close connections properly when no longer needed.
+
+2. **Text Input**:
+
+   - Stream text input word-by-word for optimal performance and lower latency.
+   - Use `flush=true` at the end of each conversation turn or sentence.
+   - Limit input text to a maximum of 10,000 characters per request.
+
+3. **Buffering and Latency**:
+
+   - Be aware of the API's buffer system for optimizing Time To First Byte (TTFB).
+   - Use the default `chunk_length_schedule` in `generation_config` unless specific latency requirements exist.
+
+4. **Audio Output Handling**:
+
+   - Implement proper error handling for audio chunk reception.
+   - Use a separate async task for listening to audio chunks.
+   - Buffer received audio chunks appropriately before playing or saving.
+
+5. **Model and Voice Selection**:
+
+   - Use the `eleven_turbo_v2_5` model for lowest latency.
+   - Prefer default voices, synthetic voices, or Instant Voice Clones over Professional Voice Clones for lower latency.
+
+6. **API Key and Security**:
+
+   - Never expose the API key in client-side code.
+   - Use environment variables to store and access the API key.
+   - Implement rate limiting on your server to prevent API key abuse.
+
+7. **Error Handling and Logging**:
+
+   - Implement comprehensive error handling for websocket events and API responses.
+   - Log errors and important events for debugging and monitoring.
+
+8. **Performance Optimization**:
+
+   - Reuse SSL/TLS sessions when streaming to reduce latency.
+   - Limit the number of websocket connection closures to minimize overhead.
+
+9. **Alignment and Timestamps**:
+
+   - Utilize the `alignment` feature when word-level timestamps are required.
+   - Implement proper parsing of alignment data for accurate word timing.
+
+10. **Concurrency and Rate Limiting**:
+
+    - Respect the concurrency limits based on your subscription tier.
+    - Implement queuing mechanisms if handling more requests than your concurrency limit.
+
+11. **Audio Format and Quality**:
+
+    - Choose the appropriate `output_format` based on your application's needs.
+    - Be aware that higher quality audio formats may increase latency and bandwidth usage.
+
+12. **Testing and Monitoring**:
+
+    - Implement thorough testing, including edge cases and error scenarios.
+    - Set up monitoring for websocket connection health and API usage.
+
+13. **Compliance and Usage**:
+    - Ensure your use of ElevenLabs' API complies with their terms of service and ethical guidelines.
+    - Monitor your API usage to stay within your plan's limits.
+
+## Development Workflow
+
+1. **Version Control**: Use Git for version control, following GitFlow or a similar branching strategy.
+2. **Code Reviews**: Require peer code reviews for all changes before merging.
+3. **Continuous Integration**: Set up CI/CD pipelines for automated testing and deployment.
+4. **Documentation**: Keep API documentation and README files up-to-date.
+5. **Dependency Management**: Use `requirements.txt` and consider using virtual environments.
+
+## Security Considerations
+
+1. **Input Validation**: Validate and sanitize all user inputs to prevent injection attacks.
+2. **Authentication**: Implement strong authentication mechanisms for all endpoints.
+3. **Authorization**: Ensure proper authorization checks for all protected resources.
+4. **Data Protection**: Encrypt sensitive data at rest and in transit.
+5. **API Rate Limiting**: Implement rate limiting to prevent abuse.
+
+Remember to always refer to the latest ElevenLabs documentation for the most up-to-date information and best practices. Regular code audits and performance reviews will help ensure adherence to these guidelines and maintain high-quality, efficient code.

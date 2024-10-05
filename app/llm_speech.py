@@ -1,13 +1,17 @@
 import os
 import asyncio
-import aiohttp
-import hashlib
+import websockets
 import json
+import base64
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 import logging
 from typing import Optional, Dict, List
-import requests
+import click
+import sounddevice as sd
+import numpy as np
+from pydub import AudioSegment
+from io import BytesIO
 
 # Configure logging
 logging.basicConfig(
@@ -21,14 +25,13 @@ class Config(BaseModel):
     openai_api_key: str = Field(default=os.getenv("OPENAI_API_KEY"))
     elevenlabs_api_key: str = Field(default=os.getenv("ELEVENLABS_API_KEY"))
     elevenlabs_voice_id: str = Field(
-        default=os.getenv("ELEVENLABS_VOICE_ID", "3lQ2xvA6eQm4KqkV0SRd")
+        default=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
     )
     elevenlabs_model_id: str = Field(
-        default=os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5")
+        default=os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2")
     )
     openai_model: str = Field(default=os.getenv("OPENAI_MODEL", "gpt-3.5-turbo"))
     output_dir: str = Field(default=os.getenv("OUTPUT_DIR", "output"))
-    cache_dir: str = Field(default=os.getenv("CACHE_DIR", "cache"))
 
 
 # Load configuration
@@ -43,142 +46,106 @@ if not config.elevenlabs_api_key:
 # Initialize AsyncOpenAI client
 client = AsyncOpenAI(api_key=config.openai_api_key)
 
-# ElevenLabs API URL
-ELEVENLABS_API_URL = (
-    f"https://api.elevenlabs.io/v1/text-to-speech/{config.elevenlabs_voice_id}"
-)
+# ElevenLabs Websocket URL
+ELEVENLABS_WS_URL = f"wss://api.elevenlabs.io/v1/text-to-speech/{config.elevenlabs_voice_id}/stream-input?model_id={config.elevenlabs_model_id}"
 
-# Cache for LLM responses and audio files
-llm_cache: Dict[str, str] = {}
-audio_cache: Dict[str, str] = {}
-
-
-def get_cache_key(data: str) -> str:
-    """Generate a unique cache key for a given string."""
-    return hashlib.md5(data.encode()).hexdigest()
+# Audio stream configuration
+SAMPLE_RATE = 44100
+CHANNELS = 1
 
 
 async def get_llm_response(prompt: str) -> Optional[str]:
-    """Asynchronously get a response from the OpenAI language model, using cache if available."""
-    cache_key = get_cache_key(prompt)
-    if cache_key in llm_cache:
-        logger.info("Using cached LLM response")
-        return llm_cache[cache_key]
-
+    """Asynchronously get a response from the OpenAI language model."""
     try:
         response = await client.chat.completions.create(
             model=config.openai_model, messages=[{"role": "user", "content": prompt}]
         )
-        llm_response = response.choices[0].message.content
-        llm_cache[cache_key] = llm_response
-
-        # Save cache to file
-        os.makedirs(config.cache_dir, exist_ok=True)
-        with open(os.path.join(config.cache_dir, "llm_cache.json"), "w") as f:
-            json.dump(llm_cache, f)
-
-        return llm_response
+        return response.choices[0].message.content
     except Exception as e:
         logger.error(f"Error in LLM request: {e}")
         return None
 
 
-async def text_to_speech(text: str, session: aiohttp.ClientSession):
-    """Asynchronously convert text to speech using ElevenLabs API and return the response."""
-    headers = {
-        "Accept": "audio/mpeg",
-        "xi-api-key": config.elevenlabs_api_key,
-        "Content-Type": "application/json",
-    }
-    data = {
-        "text": text,
-        "model_id": config.elevenlabs_model_id,
-        "voice_settings": {
-            "stability": 0.5,
-            "similarity_boost": 0.5,
-        },
-    }
-    try:
-        async with session.post(
-            ELEVENLABS_API_URL, json=data, headers=headers
-        ) as response:
-            if response.status == 200:
-                return await response.read()
-            else:
-                logger.error(
-                    f"Error in text-to-speech request: {response.status} - {await response.text()}"
-                )
-                return None
-    except Exception as e:
-        logger.error(f"Error in text-to-speech request: {e}")
-        return None
+async def text_to_speech_stream(text: str):
+    """Stream text to speech using ElevenLabs websocket API and play audio in real-time."""
+    audio_buffer = BytesIO()
+
+    async with websockets.connect(ELEVENLABS_WS_URL) as websocket:
+        await websocket.send(
+            json.dumps(
+                {
+                    "text": " ",
+                    "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+                    "xi_api_key": config.elevenlabs_api_key,
+                }
+            )
+        )
+
+        await websocket.send(json.dumps({"text": text}))
+        await websocket.send(json.dumps({"text": ""}))
+
+        while True:
+            try:
+                response = await websocket.recv()
+                data = json.loads(response)
+                if data.get("audio"):
+                    chunk = base64.b64decode(data["audio"])
+                    audio_buffer.write(chunk)
+                if data.get("isFinal"):
+                    break
+            except websockets.exceptions.ConnectionClosed:
+                break
+
+    audio_buffer.seek(0)
+    audio = AudioSegment.from_mp3(audio_buffer)
+
+    # Convert to raw audio data
+    samples = audio.get_array_of_samples()
+    audio_array = (
+        np.array(samples).astype(np.float32) / 32768.0
+    )  # Normalize to [-1.0, 1.0]
+
+    # Play the audio
+    sd.play(audio_array, samplerate=audio.frame_rate)
+    sd.wait()
+
+    # Save the complete audio file
+    os.makedirs(config.output_dir, exist_ok=True)
+    audio_filename = f"{len(os.listdir(config.output_dir)) + 1}.mp3"
+    audio_filepath = os.path.join(config.output_dir, audio_filename)
+    with open(audio_filepath, "wb") as audio_file:
+        audio_buffer.seek(0)
+        audio_file.write(audio_buffer.getvalue())
+    logger.info(f"Complete audio saved as '{audio_filepath}'")
 
 
-async def process_prompt(prompt: str, session: aiohttp.ClientSession) -> None:
+async def process_prompt(prompt: str):
     """Process a single prompt through the LLM and text-to-speech pipeline."""
     llm_response = await get_llm_response(prompt)
     if llm_response:
         logger.info(f"LLM Response: {llm_response}")
-
-        # Create a unique filename for the audio
-        audio_filename = f"{get_cache_key(llm_response)}.mp3"
-        audio_filepath = os.path.join(config.output_dir, audio_filename)
-
-        # Ensure the output directory exists
-        os.makedirs(config.output_dir, exist_ok=True)
-
-        # Get the audio response
-        audio_data = await text_to_speech(llm_response, session)
-
-        if audio_data:
-            # Write the audio data to a file
-            with open(audio_filepath, "wb") as audio_file:
-                audio_file.write(audio_data)
-
-            logger.info(f"Audio saved as '{audio_filepath}'")
-        else:
-            logger.error("Failed to get audio response.")
+        await text_to_speech_stream(llm_response)
     else:
         logger.error("Failed to get LLM response.")
 
 
-async def process_multiple_prompts(
-    prompts: List[str], session: aiohttp.ClientSession
-) -> None:
-    """Process multiple prompts concurrently."""
-    await asyncio.gather(*(process_prompt(prompt, session) for prompt in prompts))
+@click.command()
+def chat():
+    """CLI chat interface for LLM to Speech conversion."""
+    click.echo("Welcome to the LLM Voice Generator!")
+    click.echo("Type your prompts and press Enter. Type 'quit' to exit.")
 
-
-async def main():
-    # Load caches from files
-    global llm_cache, audio_cache
-    os.makedirs(config.cache_dir, exist_ok=True)
-    if os.path.exists(os.path.join(config.cache_dir, "llm_cache.json")):
-        with open(os.path.join(config.cache_dir, "llm_cache.json"), "r") as f:
-            llm_cache = json.load(f)
-    if os.path.exists(os.path.join(config.cache_dir, "audio_cache.json")):
-        with open(os.path.join(config.cache_dir, "audio_cache.json"), "r") as f:
-            audio_cache = json.load(f)
-
-    async with aiohttp.ClientSession() as session:
+    async def chat_loop():
         while True:
-            user_prompt = input("Enter your prompt for the LLM (or 'quit' to exit): ")
+            user_prompt = click.prompt("You", type=str)
             if user_prompt.lower() == "quit":
                 break
-            await process_prompt(user_prompt, session)
+            click.echo("Processing...")
+            await process_prompt(user_prompt)
+            click.echo("Audio generated, played, and saved in the output directory.")
+
+    asyncio.run(chat_loop())
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
-
-# TODO: Implement a proper CLI interface using Click or Typer
-# This would provide a more user-friendly interface and allow for
-# additional command-line options and better help documentation.
-
-# TODO: Consider containerizing the application
-# Containerization would make deployment and scaling easier, ensuring
-# consistent environments across different systems.
-
-# TODO: Add unit tests for key functions
-# Implement unit tests to ensure the reliability of functions,
-# especially for caching mechanisms and API interactions.
+    chat()
